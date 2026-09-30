@@ -1,0 +1,8 @@
+PSDs/
+_backup/
+*.zip
+*.psd
+*.bat
+Thumbs.db
+.DS_Store
+_site/
