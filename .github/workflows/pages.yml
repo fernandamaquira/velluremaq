@@ -23,7 +23,7 @@ jobs:
         run: |
           mkdir _site
           cp index.html style.css script.js liquid-metaballs.js _site/
-          cp -R fonts images videos _site/
+          cp -R fonts frames images videos _site/
           find _site -type f \( -iname '*.zip' -o -iname '*.psd' -o -iname 'Thumbs.db' \) -delete
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v4
