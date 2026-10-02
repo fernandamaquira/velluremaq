@@ -64,11 +64,11 @@ window.addEventListener("pageshow", () => {
 });
 
 const canvas = document.querySelector("#product-canvas");
-const heroVideo = document.querySelector("#hero-video");
 let context = null;
 const heroSequence = document.querySelector(".hero-sequence");
 const heroSticky = document.querySelector(".hero-sticky");
 
+const HERO_MOBILE_MAX = 700;
 const TECH_PHONE_MAX = 700;
 const TECH_TABLET_MAX = 980;
 
@@ -86,7 +86,17 @@ const TECH_TABLET_MAX = 980;
   FinalPhase:
   - the whole source frame remains contained inside the viewport
 */
+const HERO_MID_SCALE_NORMAL = 0.8;
+const HERO_MID_SCALE_WIDE = 0.72;
+const HERO_MID_SHIFT_X_DESKTOP = -0.0;
+const HERO_MID_SHIFT_X_TABLET = 0.05;
+const HERO_MID_SHIFT_Y = 0.05;
+const HERO_MID_WIDE_ASPECT_START = 1.75;
+const HERO_MID_WIDE_ASPECT_END = 2.25;
 
+const HERO_FINAL_MAX_WIDTH = 0.96;
+const HERO_FINAL_MAX_HEIGHT = 0.88;
+const HERO_FINAL_SHIFT_Y = 0.12;
 const HEADER_PRODUCT_REVEAL_START = 0.22;
 const HEADER_PRODUCT_REVEAL_END = 0.3;
 
@@ -95,6 +105,11 @@ const prefersReducedMotion = window.matchMedia(
   "(prefers-reduced-motion: reduce)",
 );
 
+const HERO_FRAMESET = {
+  count: 81,
+  path: (index) =>
+    `frames/Landing_Page_AH_-_Animação_Hero - Main${padFrame(index)}.webp`,
+};
 
 const headerProductName = document.querySelector(".site-header .header-product-name");
 const introTagline = document.querySelector(".hero-copy--bottom");
@@ -128,8 +143,7 @@ const reveals = document.querySelectorAll(".reveal");
 const techCarousel = document.querySelector("[data-tech-carousel]");
 const leadForm = document.querySelector("#lead-form");
 
-let currentVideoTime = -1;
-let pendingVideoTime = null;
+let currentFrame = 0;
 let animationStarted = false;
 let heroSequenceCleanup = null;
 let staticHeroObserver = null;
@@ -141,6 +155,7 @@ const desktopExperienceQuery = window.matchMedia("(min-width: 981px)");
 const scienceExperienceQuery = window.matchMedia("(min-width: 0px)");
 let scienceSyncVersion = 0;
 let heroFailed = false;
+let heroGeneration = 0;
 let modalBackground = [];
 let modalPreviousOverflow = "";
 let modalVideoLoadRequestId = 0;
@@ -179,6 +194,9 @@ const FINAL_SYRINGE_BODY_X = 0.5;
   These describe the visible horizontal syringe within the
   full exported frame, including transparent space.
 */
+const INTRO_SYRINGE_SOURCE_WIDTH = 0.7;
+const INTRO_SYRINGE_SOURCE_CENTER_X = 0.48;
+const INTRO_SYRINGE_SOURCE_CENTER_Y = 0.5;
 
 /*
   Final Phase hotspot positions in SOURCE IMAGE SPACE.
@@ -225,6 +243,11 @@ const heroCanvasSize = {
   height: Math.max(window.innerHeight, 1),
 };
 
+const heroFrameState = {
+  frameCount: HERO_FRAMESET.count,
+  frames: [],
+  preloadStarted: false,
+};
 
 const videoCatalog = {
   needle: {
@@ -268,30 +291,190 @@ const videoCatalog = {
 };
 
 /* ================================================================
+   HERO FRAME LOADING
+   ================================================================ */
+
+function padFrame(index) {
+  return String(index).padStart(4, "0");
+}
+
+function createFrameEntries(total) {
+  return Array.from({ length: total }, () => {
+    const image = new Image();
+    image.decoding = "async";
+    return {
+      image,
+      state: "idle",
+      promise: null,
+    };
+  });
+}
+
+function resetHeroFrameSet(force = false) {
+  if (!force && heroFrameState.frames.length) {
+    return false;
+  }
+
+  heroFrameState.frameCount = HERO_FRAMESET.count;
+  heroFrameState.frames = createFrameEntries(heroFrameState.frameCount);
+  heroFrameState.preloadStarted = false;
+
+  currentFrame = Math.max(
+    0,
+    Math.min(currentFrame, heroFrameState.frameCount - 1),
+  );
+
+  return true;
+}
+
+function resolveFramePath(index) {
+  return HERO_FRAMESET.path(index);
+}
+
+const frameQueue = [];
+let activeFrameLoads = 0;
+const MAX_FRAME_LOADS = 6;
+
+function pumpFrameQueue() {
+  frameQueue.sort(
+    (a, b) =>
+      Math.abs(a.index - currentFrame) - Math.abs(b.index - currentFrame),
+  );
+
+  while (activeFrameLoads < MAX_FRAME_LOADS && frameQueue.length) {
+    const job = frameQueue.shift();
+    if (job.entry.state !== "queued") continue;
+    job.start();
+  }
+}
+
+function loadFrame(index) {
+  const safeIndex = Math.max(0, Math.min(index, heroFrameState.frameCount - 1));
+  const entry = heroFrameState.frames[safeIndex];
+
+  if (!entry) {
+    return Promise.reject(new Error("Hero frame set is not initialized."));
+  }
+
+  if (entry.state === "loaded") {
+    return Promise.resolve(entry.image);
+  }
+
+  if (entry.promise) {
+    return entry.promise;
+  }
+
+  const generation = heroGeneration;
+  entry.state = "queued";
+  entry.promise = new Promise((resolve, reject) => {
+    let active = false;
+    let settled = false;
+    let timer;
+
+    const finish = (error, cancelled = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      entry.image.onload = null;
+      entry.image.onerror = null;
+      entry.cancel = null;
+
+      if (active) {
+        activeFrameLoads--;
+      }
+
+      if (error) {
+        entry.state = "idle";
+        entry.promise = null;
+        entry.image.removeAttribute("src");
+        reject(error);
+
+        if (!cancelled && generation === heroGeneration && allowFullMotion()) {
+          activateHeroFallback();
+        }
+      } else {
+        entry.state = "loaded";
+        resolve(entry.image);
+      }
+
+      queueMicrotask(pumpFrameQueue);
+    };
+
+    entry.cancel = () =>
+      finish(new Error("Hero frame request cancelled."), true);
+
+    frameQueue.push({
+      index: safeIndex,
+      entry,
+      start() {
+        active = true;
+        activeFrameLoads++;
+        entry.state = "loading";
+        entry.image.onload = () => {
+          const decode =
+            typeof entry.image.decode === "function"
+              ? entry.image.decode().catch(() => {})
+              : Promise.resolve();
+
+          decode.then(() => finish());
+        };
+        entry.image.onerror = () =>
+          finish(new Error("Unable to load hero frame."));
+        timer = setTimeout(
+          () => finish(new Error("Hero frame request timed out.")),
+          15000,
+        );
+        entry.image.src = resolveFramePath(safeIndex);
+      },
+    });
+  });
+
+  pumpFrameQueue();
+  return entry.promise;
+}
+/* Hero frames follow their exported, chronological order. */
+function getFrameIndexFromProgress(progress) {
+  const maxIndex = Math.max(heroFrameState.frameCount - 1, 0);
+
+  return Math.round(clamp(progress) * maxIndex);
+}
+
+/* ================================================================
    FINAL PHASE FEATURE ANCHORS
    ================================================================ */
 
-function getSourceDimensions(source) {
-  return {
-    width: source?.videoWidth || source?.naturalWidth || 0,
-    height: source?.videoHeight || source?.naturalHeight || 0,
-  };
-}
-
 function updateFinalFeatureAnchors(image, drawX, drawY, drawWidth, drawHeight) {
-  const { width: sourceWidth, height: sourceHeight } = getSourceDimensions(image);
-  if (!sourceWidth || !sourceHeight) return;
+  if (!image?.naturalWidth || !image?.naturalHeight) {
+    return;
+  }
 
   features.forEach((feature) => {
     const point = FINAL_FEATURE_SOURCE_ANCHORS[feature.dataset.videoKey];
-    if (!point) return;
 
-    const renderX = drawX + point.x * drawWidth;
-    const renderY = drawY + point.y * drawHeight;
+    if (!point) {
+      return;
+    }
+
+    /*
+      Anchors exist in source-image space.
+
+      Convert the normalized anchor to an actual source pixel,
+      then map that pixel to the current rendered frame rectangle.
+    */
+    const sourceX = image.naturalWidth * point.x;
+
+    const sourceY = image.naturalHeight * point.y;
+
+    const renderX = drawX + (sourceX / image.naturalWidth) * drawWidth;
+
+    const renderY = drawY + (sourceY / image.naturalHeight) * drawHeight;
+
     feature.style.setProperty("--feature-anchor-x", `${renderX}px`);
+
     feature.style.setProperty("--feature-anchor-y", `${renderY}px`);
   });
 }
+
 /* ================================================================
    STATIC FINAL FEATURE ANCHORS — 701–980
    ================================================================ */
@@ -405,57 +588,29 @@ function setupStaticFinalFeatureAnchors() {
 }
 
 /* ================================================================
-   HERO VIDEO SCRUBBING
+   HERO PRELOADING
    ================================================================ */
 
-const HERO_VIDEO_SEEK_EPSILON = 1 / 120;
-
-function getHeroVideoDuration() {
-  const duration = Number(heroVideo?.duration);
-  return Number.isFinite(duration) && duration > 0 ? duration : 0;
+function preloadFrameWindow(pivot, radius = 6) {
+  for (let offset = 0; offset <= radius; offset++) {
+    for (const index of new Set([pivot + offset, pivot - offset])) {
+      if (index >= 0 && index < heroFrameState.frameCount) {
+        loadFrame(index).catch(() => {});
+      }
+    }
+  }
 }
 
-function drawCurrentHeroVideoFrame() {
-  const duration = getHeroVideoDuration();
-  if (!duration || !heroVideo) return;
-  currentVideoTime = heroVideo.currentTime;
-  drawHeroVideo();
-}
-
-function commitHeroVideoSeek() {
-  if (!heroVideo || heroVideo.seeking || pendingVideoTime === null) return;
-  const duration = getHeroVideoDuration();
-  if (!duration) return;
-
-  const targetTime = Math.min(
-    Math.max(pendingVideoTime, 0),
-    Math.max(duration - 0.001, 0),
-  );
-  pendingVideoTime = null;
-
-  if (Math.abs(heroVideo.currentTime - targetTime) < HERO_VIDEO_SEEK_EPSILON) {
-    currentVideoTime = targetTime;
-    drawHeroVideo();
+function startFramePreload() {
+  if (heroFrameState.preloadStarted) {
     return;
   }
 
-  try {
-    heroVideo.currentTime = targetTime;
-  } catch {
-    activateHeroFallback();
-  }
-}
+  heroFrameState.preloadStarted = true;
 
-function requestHeroVideoProgress(progress) {
-  const duration = getHeroVideoDuration();
-  if (!heroVideo || !duration || heroVideo.readyState < 2) return;
-  pendingVideoTime = clamp(progress) * duration;
-  commitHeroVideoSeek();
-}
-
-function handleHeroVideoSeeked() {
-  drawCurrentHeroVideoFrame();
-  commitHeroVideoSeek();
+  heroFrameState.frames.forEach((_, index) => {
+    loadFrame(index).catch(() => {});
+  });
 }
 /* ================================================================
    VIDEO MODAL
@@ -1862,30 +2017,313 @@ function resizeCanvas() {
 
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
 
-  drawHeroVideo();
+  drawFrame(currentFrame);
 }
 
 /* ================================================================
-   HERO VIDEO RENDERING
+   HERO FRAME RENDERING
    ================================================================ */
 
-function drawHeroVideo() {
-  if (!canvas || !context || !heroVideo || !heroVideo.videoWidth || !heroVideo.videoHeight) return;
+function drawFrame(index) {
+  if (!canvas || !context || !heroFrameState.frames.length) {
+    return;
+  }
 
-  const sourceWidth = heroVideo.videoWidth;
-  const sourceHeight = heroVideo.videoHeight;
+  const maxIndex = Math.max(heroFrameState.frameCount - 1, 0);
+
+  const safeIndex = Math.max(0, Math.min(index, maxIndex));
+
+  const sequenceProgress = safeIndex / Math.max(maxIndex, 1);
+
+  const frameEntry = heroFrameState.frames[safeIndex];
+
+  if (!frameEntry) {
+    return;
+  }
+
+  const image = frameEntry.image;
+
+  if (frameEntry.state !== "loaded" || !image.complete || !image.naturalWidth) {
+    loadFrame(safeIndex)
+      .then(() => {
+        if (safeIndex === currentFrame) {
+          drawFrame(safeIndex);
+        }
+      })
+      .catch(() => {});
+
+    return;
+  }
+
   const { width, height } = heroCanvasSize;
-  const stageWidth = width * 0.72;
-  const stageHeight = height * 0.84;
-  const scale = Math.min(stageWidth / sourceWidth, stageHeight / sourceHeight);
-  const renderWidth = sourceWidth * scale;
-  const renderHeight = sourceHeight * scale;
-  const renderX = (width - renderWidth) / 2;
-  const renderY = (height - renderHeight) / 2;
+
+  const imageRatio = image.naturalWidth / image.naturalHeight;
+
+  const viewportRatio = width / Math.max(height, 1);
+
+  const smooth = (value) => {
+    const t = clamp(value);
+    return t * t * (3 - 2 * t);
+  };
+
+  const lerp = (from, to, amount) => from + (to - from) * amount;
+
+  const mixRect = (from, to, amount) => ({
+    x: lerp(from.x, to.x, amount),
+    y: lerp(from.y, to.y, amount),
+    width: lerp(from.width, to.width, amount),
+    height: lerp(from.height, to.height, amount),
+  });
+
+  /*
+    ---------------------------------------------------------------
+    BASE FRAME
+
+    Start from one stable cover rectangle. All desktop/tablet phase
+    compositions are calculated from THIS rectangle rather than from
+    the result of a previous phase. This prevents accumulated scale
+    and position errors while scrolling.
+    ---------------------------------------------------------------
+  */
+  let baseWidth = width;
+  let baseHeight = width / imageRatio;
+  let baseX = (width - baseWidth) / 2;
+  let baseY = (height - baseHeight) / 2;
+
+  if (viewportRatio < imageRatio) {
+    baseHeight = height;
+    baseWidth = height * imageRatio;
+    baseX = (width - baseWidth) / 2;
+    baseY = 0;
+  }
+
+  const baseRect = {
+    x: baseX,
+    y: baseY,
+    width: baseWidth,
+    height: baseHeight,
+  };
+
+  let renderRect = { ...baseRect };
+
+  /*
+    ---------------------------------------------------------------
+    DESKTOP / TABLET COMPOSITION
+
+    Phase flow:
+      intro -> base -> mid -> final
+
+    Mid and Final rectangles are independent. FinalPhase does NOT
+    scale a MidPhase result, and MidPhase does NOT scale an Intro
+    result. Only the interpolation changes with scroll.
+    ---------------------------------------------------------------
+  */
+  if (width > HERO_MOBILE_MAX) {
+    /*
+      INTRO
+
+      Keep the current Vellure/syringe registration, but restrict it
+      to the intro range. At 20% progress the composition is back on
+      the neutral base rectangle.
+    */
+    const introProgress = 1 - smooth(fade(sequenceProgress, 0.18, 0.34));
+
+    if (introProgress > 0) {
+      const canvasBounds = canvas.getBoundingClientRect();
+
+      const vellureBounds = heroVellure?.getBoundingClientRect();
+
+      const targetWordWidth =
+        vellureBounds?.width || Math.min(width * 0.72, 920);
+
+      const targetWordCenter = vellureBounds
+        ? vellureBounds.left - canvasBounds.left + vellureBounds.width / 2
+        : width / 2;
+
+      const targetWordBottom = vellureBounds
+        ? vellureBounds.bottom - canvasBounds.top
+        : height * 0.3 + Math.min(Math.max(width * 0.21, 110), 300);
+
+      const introWidth = targetWordWidth / INTRO_SYRINGE_SOURCE_WIDTH;
+
+      const introHeight = introWidth / imageRatio;
+
+      const introRect = {
+        x: targetWordCenter - introWidth * INTRO_SYRINGE_SOURCE_CENTER_X,
+        y: targetWordBottom - introHeight * INTRO_SYRINGE_SOURCE_CENTER_Y,
+        width: introWidth,
+        height: introHeight,
+      };
+
+      renderRect = mixRect(baseRect, introRect, introProgress);
+    }
+
+    /*
+      MID PHASE
+
+      Wide screens receive slightly more reduction so the syringe
+      never balloons/crops. The target is stable for a given viewport,
+      and is shifted to the right without adding a second transform.
+    */
+    const wideAspectProgress = smooth(
+      (viewportRatio - HERO_MID_WIDE_ASPECT_START) /
+        (HERO_MID_WIDE_ASPECT_END - HERO_MID_WIDE_ASPECT_START),
+    );
+
+    const midScale = lerp(
+      HERO_MID_SCALE_NORMAL,
+      HERO_MID_SCALE_WIDE,
+      wideAspectProgress,
+    );
+
+    const midWidth = baseRect.width * midScale;
+
+    const midHeight = baseRect.height * midScale;
+
+    const midShiftX =
+      width *
+      (width >= 1000 ? HERO_MID_SHIFT_X_DESKTOP : HERO_MID_SHIFT_X_TABLET);
+
+    const midRect = {
+      x: width / 2 - midWidth / 2 + midShiftX,
+      y: height / 2 - midHeight / 2 + height * HERO_MID_SHIFT_Y,
+      width: midWidth,
+      height: midHeight,
+    };
+
+    /*
+      FINAL PHASE
+
+      The complete frame is contained inside a viewport-bounded box.
+      Compared with the old version, much less empty space is reserved
+      above/below, so the standing syringe reads significantly larger
+      while remaining inside 100vh.
+    */
+    const finalScale = Math.min(
+      (width * HERO_FINAL_MAX_WIDTH) / image.naturalWidth,
+      (height * HERO_FINAL_MAX_HEIGHT) / image.naturalHeight,
+    );
+
+    const finalWidth = image.naturalWidth * finalScale;
+
+    const finalHeight = image.naturalHeight * finalScale;
+
+    const finalRect = {
+      x: (width - finalWidth) / 2,
+      y: (height - finalHeight) / 2 + height * HERO_FINAL_SHIFT_Y,
+      width: finalWidth,
+      height: finalHeight,
+    };
+
+    /*
+      Explicit phase interpolation.
+
+      START -> MID
+      The previous version briefly returned to the neutral cover/base
+      rectangle before reaching MidPhase. That created the visible
+      "scale-up then scale-down" feeling.
+
+      Now the composition moves directly from the intro registration
+      into the MidPhase target.
+
+      0.00 -> 0.14 : hold the intro registration
+      0.14 -> 0.34 : intro directly to MidPhase
+      0.34 -> 0.66 : hold MidPhase
+      0.66 -> 0.84 : MidPhase to FinalPhase
+      0.84 -> end  : hold FinalPhase
+    */
+
+    const introToMidAmount = smooth(fade(sequenceProgress, 0.14, 0.34));
+
+    if (sequenceProgress < 0.34) {
+      /*
+        When introProgress is still active, renderRect is already the
+        current intro composition. Blend from that exact rectangle to
+        MidPhase instead of rebuilding from baseRect.
+      */
+      renderRect = mixRect(renderRect, midRect, introToMidAmount);
+    } else if (sequenceProgress < 0.66) {
+      renderRect = { ...midRect };
+    } else {
+      const finalAmount = smooth(fade(sequenceProgress, 0.66, 0.84));
+
+      renderRect = mixRect(midRect, finalRect, finalAmount);
+    }
+  }
+
+  /*
+    ---------------------------------------------------------------
+    MOBILE FALLBACK USING DESKTOP FRAMES
+    ---------------------------------------------------------------
+  */
+  if (width <= HERO_MOBILE_MAX) {
+    const mobileProgress =
+      safeIndex / Math.max(heroFrameState.frameCount - 1, 1);
+
+    const isMidPhase = mobileProgress > 0.24 && mobileProgress < 0.68;
+
+    const finalPhaseProgress = fade(mobileProgress, 0.72, 0.86);
+
+    if (finalPhaseProgress > 0) {
+      const containScale = Math.min(
+        (width * 1.02) / image.naturalWidth,
+        (height * 0.88) / image.naturalHeight,
+      );
+
+      const mobileWidth = image.naturalWidth * containScale;
+
+      const mobileHeight = image.naturalHeight * containScale;
+
+      renderRect = {
+        x: (width - mobileWidth) / 2 + width * 0.02,
+        y: (height - mobileHeight) / 2 - height * 0.01,
+        width: mobileWidth,
+        height: mobileHeight,
+      };
+    } else {
+      const containScale = Math.min(
+        ((isMidPhase ? 1.12 : 0.98) * width) / image.naturalWidth,
+        ((isMidPhase ? 0.94 : 0.86) * height) / image.naturalHeight,
+      );
+
+      const mobileWidth = image.naturalWidth * containScale;
+
+      const mobileHeight = image.naturalHeight * containScale;
+
+      const centerY = isMidPhase ? height * 0.58 : height * 0.54;
+
+      const offsetX = isMidPhase ? width * 0.17 : width * 0.08;
+
+      renderRect = {
+        x: (width - mobileWidth) / 2 + offsetX,
+        y: centerY - mobileHeight / 2,
+        width: mobileWidth,
+        height: mobileHeight,
+      };
+    }
+  }
 
   context.clearRect(0, 0, width, height);
-  context.drawImage(heroVideo, renderX, renderY, renderWidth, renderHeight);
-  updateFinalFeatureAnchors(heroVideo, renderX, renderY, renderWidth, renderHeight);
+
+  context.drawImage(
+    image,
+    renderRect.x,
+    renderRect.y,
+    renderRect.width,
+    renderRect.height,
+  );
+
+  /*
+    Hotspots use the exact final rectangle sent to drawImage().
+    This keeps the play buttons source-pixel driven at every width.
+  */
+  updateFinalFeatureAnchors(
+    image,
+    renderRect.x,
+    renderRect.y,
+    renderRect.width,
+    renderRect.height,
+  );
 }
 
 /* ================================================================
@@ -1898,6 +2336,12 @@ function updateSequence() {
   }
 
   if (prefersReducedMotion.matches) {
+    currentFrame = getFrameIndexFromProgress(0);
+
+    lastFrameProgress = 0;
+
+    drawFrame(currentFrame);
+
     return;
   }
 
@@ -1914,7 +2358,22 @@ function updateSequence() {
 
   lastFrameProgress = frameProgress;
 
-  requestHeroVideoProgress(frameProgress);
+  const frame = getFrameIndexFromProgress(frameProgress);
+
+  /*
+    Only redraw the canvas when the
+    actual image frame changes.
+
+    Resize/load callbacks still redraw
+    explicitly when necessary.
+  */
+  if (frame !== currentFrame) {
+    currentFrame = frame;
+
+    preloadFrameWindow(currentFrame);
+
+    drawFrame(currentFrame);
+  }
 
   const introProgress = 1 - fade(frameProgress, 0.06, 0.2);
 
@@ -2054,10 +2513,29 @@ function startSequence() {
 
 function handleHeroResize() {
   if (!allowFullMotion() || !context) return;
+  const frameSetChanged = resetHeroFrameSet();
+
+  currentFrame = getFrameIndexFromProgress(lastFrameProgress);
+
+  if (frameSetChanged) {
+    loadFrame(currentFrame)
+      .catch(() => {})
+      .finally(() => {
+        startFramePreload();
+
+        resizeCanvas();
+
+        scheduleSequenceUpdate();
+      });
+
+    return;
+  }
+
   resizeCanvas();
-  requestHeroVideoProgress(lastFrameProgress);
+
   scheduleSequenceUpdate();
 }
+
 /* ================================================================
    PRESENTATION DETAILS
    ================================================================ */
@@ -2310,70 +2788,82 @@ function activateHeroFallback() {
 }
 
 function initHeroSequence() {
-  if (heroSequenceCleanup || !canvas || !heroVideo || !heroSequence) return;
+  if (heroSequenceCleanup || !canvas || !heroSequence) {
+    return;
+  }
 
   context = canvas.getContext("2d");
+
   if (!context) {
     activateHeroFallback();
     return;
   }
 
-  let videoStarted = false;
-  const startVideoSequence = () => {
-    if (
-      videoStarted ||
-      !allowFullMotion() ||
-      heroVideo.readyState < 2 ||
-      !getHeroVideoDuration()
-    ) return;
+  const generation = ++heroGeneration;
+  resetHeroFrameSet(true);
 
-    videoStarted = true;
-    heroVideo.pause();
-    heroVideo.addEventListener("seeked", handleHeroVideoSeeked);
-    startSequence();
-    startVellureIntroReveal();
-    requestHeroVideoProgress(lastFrameProgress);
-  };
-  const handleHeroVideoError = () => {
-    if (allowFullMotion()) activateHeroFallback();
-  };
+  currentFrame = getFrameIndexFromProgress(0);
 
-  heroVideo.addEventListener("loadeddata", startVideoSequence, { once: true });
-  heroVideo.addEventListener("error", handleHeroVideoError, { once: true });
-  heroVideo.preload = "auto";
-  if (heroVideo.readyState >= 2 && getHeroVideoDuration()) {
-    startVideoSequence();
-  } else {
-    heroVideo.load();
-  }
+  loadFrame(currentFrame)
+    .then(() => {
+      if (!allowFullMotion() || generation !== heroGeneration) return;
+      startSequence();
+      startVellureIntroReveal();
+      startFramePreload();
+    })
+    .catch(() => {
+      if (generation === heroGeneration && allowFullMotion())
+        activateHeroFallback();
+    });
 
   const onHeroViewportResize = debounce(handleHeroResize, 150);
-  window.addEventListener("scroll", scheduleSequenceUpdate, { passive: true });
+
+  window.addEventListener("scroll", scheduleSequenceUpdate, {
+    passive: true,
+  });
+
   window.addEventListener("resize", onHeroViewportResize);
+
   window.visualViewport?.addEventListener("resize", onHeroViewportResize);
 
   heroSequenceCleanup = () => {
+    ++heroGeneration;
     onHeroViewportResize.cancel();
     window.removeEventListener("scroll", scheduleSequenceUpdate);
+
     window.removeEventListener("resize", onHeroViewportResize);
+
     window.visualViewport?.removeEventListener("resize", onHeroViewportResize);
-    heroVideo.removeEventListener("loadeddata", startVideoSequence);
-    heroVideo.removeEventListener("error", handleHeroVideoError);
-    heroVideo.removeEventListener("seeked", handleHeroVideoSeeked);
-    heroVideo.pause();
+
     if (sequenceRaf !== null) {
       cancelAnimationFrame(sequenceRaf);
       sequenceRaf = null;
     }
+
+    heroFrameState.frames.forEach((entry) => {
+      entry.cancel?.();
+      if (entry?.image) {
+        entry.image.onload = null;
+        entry.image.onerror = null;
+        entry.image.src = "";
+      }
+    });
+
+    heroFrameState.frames = [];
+    heroFrameState.preloadStarted = false;
     animationStarted = false;
-    currentVideoTime = -1;
-    pendingVideoTime = null;
+    currentFrame = 0;
     lastFrameProgress = 0;
-    if (context && canvas) context.clearRect(0, 0, heroCanvasSize.width, heroCanvasSize.height);
+
+    if (context && canvas) {
+      context.clearRect(0, 0, heroCanvasSize.width, heroCanvasSize.height);
+    }
+
     context = null;
     heroSequenceCleanup = null;
   };
 }
+
 function destroyHeroSequence() {
   heroSequenceCleanup?.();
 }

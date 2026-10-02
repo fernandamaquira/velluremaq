@@ -125,16 +125,6 @@ nav span {
   top: 0;
   width: 100%;
 }
-
-#hero-video {
-  height: 1px;
-  left: 0;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  width: 1px;
-}
 .hero-vignette {
   background: linear-gradient(
     180deg,
