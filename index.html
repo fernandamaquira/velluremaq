@@ -40,7 +40,10 @@
         document.documentElement.dataset.scienceMode = "static";
       })();
     </script>
-    <link href="style.css?v=text-layout-20260925" rel="stylesheet" />
+    <link
+      href="style.css?v=hero-video-scroll-scrub-20261002"
+      rel="stylesheet"
+    />
     <script type="importmap">
       {
         "imports": {
@@ -70,6 +73,15 @@
               aria-label="Animação do Vellure Lift Lido"
               id="product-canvas"
             ></canvas>
+            <video
+              aria-hidden="true"
+              id="hero-video"
+              muted
+              playsinline
+              preload="none"
+              src="videos/hero-section.mp4?v=hero-scroll-scrub-20261002-1"
+              tabindex="-1"
+            ></video>
             <div aria-hidden="true" class="hero-vellure"></div>
           </div>
           <div aria-hidden="true" class="hero-vignette"></div>
@@ -109,13 +121,13 @@
                   <p>Marcação<strong>0,05 mL</strong></p>
                 </button>
                 <button
-                  aria-label="Abrir vídeo sobre Dosador em Vidro Premium"
+                  aria-label="Abrir vídeo sobre Seringa em Vidro Premium"
                   class="feature feature--dosage"
                   data-video-key="dosage"
                   type="button"
                 >
                   <i></i>
-                  <p>Dosador<strong>VIDRO PREMIUM</strong></p>
+                  <p>Seringa em<strong>VIDRO PREMIUM</strong></p>
                 </button>
                 <button
                   aria-label="Abrir vídeo sobre Apoiador Ergonômico"
@@ -145,7 +157,7 @@
             <source
               media="(min-width: 701px) and (max-width: 980px)"
               srcset="
-                frames/Landing_Page_AH_-_Animação_Hero%20-%20Main0000.webp
+                images/mobile/hero-intro.webp?v=hero-mobile-20260924-1
               "
             />
             <img
@@ -548,9 +560,9 @@
           <img
             alt=""
             decoding="async"
-            height="1350"
+            height="1402"
             loading="lazy"
-            src="images/mobile/science-static.png"
+            src="images/mobile/science-static-transparent.png?v=science-static-transparent-20261001"
             width="1080"
           />
         </picture>
@@ -606,9 +618,16 @@
       >
         <div class="presentations-showcase__header reveal">
           <h2>
+            <span
+              aria-label="Vellure Lift Lido"
+              class="presentations-showcase__headline-line faq-product-lockup"
+            >
+              <span aria-hidden="true" class="faq-vellure-mask"></span>
+              <span class="faq-product-name"
+                ><span>Lift</span><em>Lido</em></span
+              >
+            </span>
             <span class="presentations-showcase__headline-line"
-              >Vellure Lift Lido</span
-            ><span class="presentations-showcase__headline-line"
               >disponível em duas apresentações</span
             >
           </h2>
@@ -620,12 +639,6 @@
             <span class="presentation-card__badge">1 mL</span>
             <div class="presentation-card__copy">
               <div class="presentation-card__info">
-                <div
-                  class="presentation-card__lockup"
-                  aria-label="Vellure Lift Lido"
-                >
-                  <span class="header-product-name">Lift <em>Lido</em></span>
-                </div>
                 <p class="presentation-card__badge-description">
                   Praticidade para procedimentos pontuais
                 </p>
@@ -644,7 +657,7 @@
                 class="presentation-card__image"
                 decoding="async"
                 loading="lazy"
-                src="images/cards/card1_1ml.webp"
+                src="images/mockup-1mL.webp"
                 role="button"
                 tabindex="0"
                 aria-label="Ampliar imagem da apresentação"
@@ -658,12 +671,6 @@
             <span class="presentation-card__badge">2 mL</span>
             <div class="presentation-card__copy">
               <div class="presentation-card__info">
-                <div
-                  class="presentation-card__lockup"
-                  aria-label="Vellure Lift Lido"
-                >
-                  <span class="header-product-name">Lift <em>Lido</em></span>
-                </div>
                 <p class="presentation-card__badge-description">
                   Mais volume para tratamentos completos e com melhor
                   custo-benefício
@@ -683,7 +690,7 @@
                 class="presentation-card__image"
                 decoding="async"
                 loading="lazy"
-                src="images/cards/card1_2ml.webp"
+                src="images/mockup-2mL.webp"
                 role="button"
                 tabindex="0"
                 aria-label="Ampliar imagem da apresentação"
@@ -711,7 +718,7 @@
               >
                 <picture class="card2__picture">
                   <source
-                    media="(max-width: 734px)"
+                    media="(max-width: 700px)"
                     srcset="images/mobile/card2_mobile.png"
                   />
                   <img
@@ -1144,6 +1151,6 @@
       href="#top"
       >↑</a
     >
-    <script src="script.js?v=play-pause-refinement-20260925"></script>
+    <script src="script.js?v=hero-video-contained-stage-20261002"></script>
   </body>
 </html>
