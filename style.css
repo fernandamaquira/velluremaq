@@ -11348,7 +11348,6 @@ html.hero-vellure-intro-ready .hero-static__vellure::before {
 }
 
 .presentation-card__visual {
-  background: #000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11457,7 +11456,6 @@ html.hero-vellure-intro-ready .hero-static__vellure::before {
   order: 1 !important;
   align-items: center;
   justify-content: flex-start !important;
-  padding-left: clamp(0px, 1vw, 12px);
 }
 
 .presentation-card .presentation-card__copy,
@@ -11468,7 +11466,8 @@ html.hero-vellure-intro-ready .hero-static__vellure::before {
 
 .presentation-card__image,
 .presentation-card--2ml .presentation-card__image {
-  width: min(100%, 385px) !important;
+  width: min(110%, 424px) !important;
+  flex-shrink: 0;
   margin-left: 0;
   margin-right: auto;
 }
@@ -11546,7 +11545,7 @@ html.hero-vellure-intro-ready .hero-static__vellure::before {
 
   .presentation-card__image,
   .presentation-card--2ml .presentation-card__image {
-    width: min(100%, 310px) !important;
+    width: min(110%, 341px) !important;
     margin-inline: auto;
   }
 }
