@@ -2572,18 +2572,6 @@ function initDetails(container = document) {
     "images/cards/card1_2ml.webp",
   ];
 
-  /*
-    Preload both variants so mobile can switch src without the decode
-    pop that would happen on the first toggle.
-  */
-  const presentationArtworkPreloads = presentationArtworkSources.map(
-    (source) => {
-      const image = new Image();
-      image.decoding = "async";
-      image.src = source;
-      return image;
-    },
-  );
 
   const syncPresentationArtwork = () => {
     const activeIndex = items.findIndex((item) => item.open);
@@ -2738,6 +2726,10 @@ function startVellureIntroReveal() {
 function prepareStaticVellureIntroReveal() {
   if (vellureIntroRevealStarted || desktopExperienceQuery.matches) {
     return;
+  }
+
+  if (staticHeroIntroImage?.dataset.src && !staticHeroIntroImage.currentSrc) {
+    staticHeroIntroImage.src = staticHeroIntroImage.dataset.src;
   }
 
   if (!staticHeroIntroImage) {
